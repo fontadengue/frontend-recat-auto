@@ -56,7 +56,10 @@ export default function Home() {
         });
         const data = await res.json();
         setStatus(data);
-        if (data.status === 'done' || data.status === 'error') {
+        if (data.status === 'done') {
+          clearInterval(pollRef.current);
+          handleDownload(id); // descarga automática apenas termina
+        } else if (data.status === 'error') {
           clearInterval(pollRef.current);
         }
       } catch (err) {
@@ -66,20 +69,37 @@ export default function Home() {
     }, 2500);
   }
 
-  function handleDownload() {
-    const url = `${API_URL}/download/${jobId}`;
-    if (API_KEY) {
-      // Si hay API key, hay que traer el blob a mano (no se puede pasar header en <a href>)
-      fetch(url, { headers: { 'x-api-key': API_KEY } })
-        .then((r) => r.blob())
-        .then((blob) => {
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = `clientes_afip_${jobId}.zip`;
-          link.click();
-        });
-    } else {
-      window.location.href = url;
+  async function handleDownload(jobIdOverride) {
+    const idParaDescargar = jobIdOverride || jobId;
+    const url = `${API_URL}/download/${idParaDescargar}`;
+    try {
+      const res = await fetch(url, {
+        headers: API_KEY ? { 'x-api-key': API_KEY } : {},
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('zip')) {
+        // La respuesta no es un zip real (probablemente un error en JSON,
+        // por ejemplo si el job expiró de la memoria del backend). Mostramos
+        // el error en vez de descargar un archivo corrupto.
+        let mensaje = `Error al descargar (HTTP ${res.status})`;
+        try {
+          const data = await res.json();
+          if (data && data.error) mensaje = data.error;
+        } catch (_) {
+          // la respuesta no era JSON tampoco, nos quedamos con el mensaje genérico
+        }
+        setError(mensaje);
+        return;
+      }
+
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `clientes_afip_${idParaDescargar}.zip`;
+      link.click();
+    } catch (err) {
+      setError(`Error al descargar: ${err.message}`);
     }
   }
 
@@ -87,8 +107,9 @@ export default function Home() {
     <main style={{ maxWidth: 640, margin: '40px auto', fontFamily: 'system-ui, sans-serif', padding: '0 16px' }}>
       <h1>Scraper AFIP / ARCA</h1>
       <p style={{ color: '#555' }}>
-        Subí un excel con columna A: CUIT y columna B: Clave fiscal. El proceso hace login por
-        cada cliente, saca la facturación de Monotributo y el total de comprobantes recibidos.
+        Subí un excel con columna A: CUIT, columna B: Clave fiscal y columna C: Número de cliente.
+        El proceso hace login por cada cliente, saca la facturación de Monotributo y el total de
+        comprobantes recibidos.
       </p>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24 }}>
@@ -124,7 +145,7 @@ export default function Home() {
             <ul>
               {status.resultados.map((r) => (
                 <li key={r.cuit}>
-                  {r.cuit} — {r.nombre || '(sin nombre)'} {r.error ? `⚠️ ${r.error}` : '✅'}
+                  {r.numeroCliente ? `${r.numeroCliente} — ` : ''}{r.cuit} — {r.nombre || '(sin nombre)'} {r.error ? `⚠️ ${r.error}` : '✅'}
                 </li>
               ))}
             </ul>
