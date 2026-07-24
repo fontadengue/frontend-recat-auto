@@ -49,12 +49,16 @@ export default function Home() {
 
   function iniciarPolling(id) {
     if (pollRef.current) clearInterval(pollRef.current);
+    let fallosConsecutivos = 0;
+    const MAX_FALLOS_CONSECUTIVOS = 8; // ~20s de margen a fallos transitorios de red
+
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`${API_URL}/status/${id}`, {
           headers: API_KEY ? { 'x-api-key': API_KEY } : {},
         });
         const data = await res.json();
+        fallosConsecutivos = 0;
         setStatus(data);
         if (data.status === 'done') {
           clearInterval(pollRef.current);
@@ -63,8 +67,13 @@ export default function Home() {
           clearInterval(pollRef.current);
         }
       } catch (err) {
-        setError(err.message);
-        clearInterval(pollRef.current);
+        fallosConsecutivos += 1;
+        if (fallosConsecutivos >= MAX_FALLOS_CONSECUTIVOS) {
+          setError(`No se pudo conectar con el servidor tras varios intentos: ${err.message}`);
+          clearInterval(pollRef.current);
+        }
+        // si no, seguimos intentando en la próxima vuelta del polling —
+        // puede ser un reinicio momentáneo del backend
       }
     }, 2500);
   }
